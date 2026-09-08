@@ -46,7 +46,7 @@ def _trabajador_bertscore_proceso(referencia, generada, queue):
         
 
         # Configuración de entorno
-        os.environ["HF_TOKEN"] = "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"
+        
         os.environ["TOKENIZERS_PARALLELISM"] = "false"
         os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
         os.environ["TRANSFORMERS_VERBOSITY"] = "error"
@@ -1281,7 +1281,7 @@ class AplicacionDocumentador(ctk.CTk):
 
         """Sube automáticamente el paquete ZIP a una carpeta dentro de GitHub"""
 
-        GITHUB_TOKEN = "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"
+        
         REPO_OWNER = "lalcivar"
         REPO_NAME = "DocumentacionTecnicaGenerada"
         CARPETA_DESTINO = "ManualTecnico"
