@@ -1,0 +1,30 @@
+pluginManagement {
+	includeBuild("../base")
+}
+
+plugins {
+	id("junitbuild.settings-conventions")
+	id("junitbuild.dsl-extensions") apply false
+}
+
+dependencyResolutionManagement {
+	versionCatalogs {
+		create("libs") {
+			from(files("../libs.versions.toml"))
+		}
+	}
+	repositories {
+		gradlePluginPortal()
+	}
+}
+
+rootProject.name = "plugins"
+
+include("antora")
+include("backward-compatibility")
+include("common")
+include("code-generator")
+include("javadoc")
+include("publishing")
+
+enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")

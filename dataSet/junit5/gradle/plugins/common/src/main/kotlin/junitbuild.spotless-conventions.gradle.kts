@@ -1,0 +1,76 @@
+import com.diffplug.spotless.LineEnding
+import junitbuild.extensions.requiredVersionFromLibs
+
+plugins {
+	id("com.diffplug.spotless")
+	id("junitbuild.license")
+}
+
+spotless {
+
+	format("markdown") {
+		target("*.md", "src/**/*.md")
+		trimTrailingWhitespace()
+		endWithNewline()
+	}
+
+	pluginManager.withPlugin("java") {
+
+		val license = project.the<License>()
+		val configDir = layout.settingsDirectory.dir("gradle/config/eclipse")
+		val importOrderConfigFile = configDir.file("junit-eclipse.importorder")
+		val javaFormatterConfigFile = configDir.file("junit-eclipse-formatter-settings.xml")
+
+		java {
+			targetExclude("**/module-info.java", "**/package-info.java")
+			licenseHeaderFile(license.headerFile, "(package|import) ")
+			importOrderFile(importOrderConfigFile)
+			val fullVersion = requiredVersionFromLibs("eclipse")
+			val majorMinorVersion = "([0-9]+\\.[0-9]+).*".toRegex().matchEntire(fullVersion)!!.let { it.groups[1]!!.value }
+			eclipse(majorMinorVersion).configFile(javaFormatterConfigFile)
+			trimTrailingWhitespace()
+			endWithNewline()
+		}
+
+		format("moduleAndPackageInfo") {
+			target(fileTree(layout.projectDirectory.dir("src/main/java")) {
+				include("module-info.java", "**/package-info.java")
+			})
+			licenseHeaderFile(license.headerFile, "((/(//|\\*\\*))|((open )?module )|package|@.+)")
+			trimTrailingWhitespace()
+			endWithNewline()
+			leadingSpacesToTabs()
+		}
+	}
+
+	pluginManager.withPlugin("org.jetbrains.kotlin.jvm") {
+		val license = project.the<License>()
+		kotlin {
+			targetExclude("**/src/test/resources/**")
+			ktlint(requiredVersionFromLibs("ktlint"))
+			licenseHeaderFile(license.headerFile)
+			trimTrailingWhitespace()
+			endWithNewline()
+			toggleOffOn("formatter:off", "formatter:on")
+		}
+	}
+
+	pluginManager.withPlugin("groovy") {
+		val license = project.the<License>()
+		groovy {
+			licenseHeaderFile(license.headerFile)
+			trimTrailingWhitespace()
+			endWithNewline()
+		}
+	}
+
+	yaml {
+		target("*.yaml", "*.yml")
+		trimTrailingWhitespace()
+		endWithNewline()
+	}
+
+	// Explicitly configure line endings to avoid Spotless to search for .gitattributes file
+	// see https://github.com/gradle/gradle/issues/25469#issuecomment-3444231151
+	lineEndings = LineEnding.UNIX
+}

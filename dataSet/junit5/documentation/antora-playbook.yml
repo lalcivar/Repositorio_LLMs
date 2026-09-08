@@ -1,0 +1,42 @@
+antora:
+  extensions:
+  - '@antora/collector-extension'
+  - require: '@antora/lunr-extension'
+    index_latest_only: true
+    index_by_heading: true
+  - require: '@springio/antora-extensions/root-component-extension'
+    root_component_name: junit
+  - require: '@springio/antora-extensions/root-attachments-extension'
+  - require: '@springio/antora-xref-extension'
+site:
+  title: JUnit User Guide
+  start_page: junit::overview.adoc
+content:
+  sources:
+  - url: @GIT_REPO_ROOT@
+    branches: @GIT_BRANCH_NAME@
+    start_path: documentation
+    worktrees: true
+asciidoc:
+  extensions:
+  - '@asciidoctor/tabs'
+  attributes:
+    page-pagination: ''
+    idprefix: '@'
+    idseparator: '-@'
+    table-caption: false
+    table-frame: 'none@'
+    table-grid: 'rows@'
+    table-stripes: 'odd@'
+    figure-caption: false
+    example-caption: false
+    listing-caption: false
+    hide-uri-scheme: '@'
+    attribute-missing: warn
+    tabs-sync-option: ''
+runtime:
+  log:
+    failure_level: warn
+ui:
+  bundle:
+    url: https://github.com/junit-team/antora-ui/releases/download/20260813-111129/ui-bundle.zip

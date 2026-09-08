@@ -1,0 +1,43 @@
+# Gradle
+.gradle
+.kotlin
+build
+
+# Ignore Gradle GUI config
+gradle-app.setting
+
+# Eclipse
+.classpath
+.settings/
+.project
+/bin/
+/*/bin
+/gradle/plugins/*/bin
+
+# IntelliJ
+*.iml
+*.ipr
+*.iws
+*.uml
+**/.idea/*
+!/.idea/icon.png
+!/.idea/vcs.xml
+/out/
+/*/out/
+
+# Misc
+*.log
+*.graphml
+coverage.db*
+.metadata
+/.sdkmanrc
+/.tool-versions
+
+checksums*
+
+# snapshot-tests
+*.snapshot_actual
+*.snapshot_raw
+
+# Antora
+/documentation/node_modules/

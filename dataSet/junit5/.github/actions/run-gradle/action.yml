@@ -1,0 +1,66 @@
+name: Run Gradle
+description: Sets up Gradle JDKs and runs Gradle
+inputs:
+  arguments:
+    required: true
+    description: Gradle arguments
+    default: build
+  broken-by-issue:
+    required: false
+    description: Expect the build to fail due the referenced GitHub issue
+    default: ""
+  encryptionKey:
+    required: true
+    description: Gradle cache encryption key
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+      id: setup-gradle-jdk
+      with:
+        distribution: temurin
+        java-version: 25
+        check-latest: true
+    - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      with:
+        cache-encryption-key: ${{ inputs.encryptionKey }}
+    - uses: testlens-app/setup-testlens@d29a2be31512b3aeda3adcef09fbe0d55af90c51 # v1.9.4
+      with:
+        write-log-files: true
+    - shell: bash
+      env:
+        JAVA_HOME: ${{ steps.setup-gradle-jdk.outputs.path }}
+      run: | # zizmor: ignore[template-injection]
+        ./gradlew \
+        -Dorg.gradle.java.installations.auto-download=false \
+        -Pjunit.develocity.buildCache.pushEnabled=${{ github.repository == 'junit-team/junit-framework' }} \
+        -Pjunit.develocity.predictiveTestSelection.enabled=true \
+        -Pjunit.develocity.predictiveTestSelection.selectRemainingTests=${{ github.event_name != 'pull_request' }} \
+        "-Dscan.value.GitHub job=${{ github.job }}" \
+        javaToolchains \
+        ${{ inputs.arguments }} || error_code=$?
+
+
+        if [ -n "${{ inputs.broken-by-issue }}" ]; then
+          if [ -n "$error_code" ]; then
+            # we expected the build to fail, it failed => pass
+            exit 0
+          else
+            # we expected the build to fail, it didn't => fail
+            RED='\033[0;31m'
+            RESET='\033[0m' # No Color
+            echo "${RED}Build was expected to fail, but it passed. Was ${{ inputs.broken-by-issue }} resolved?${RESET}"
+            exit 1
+          fi
+        fi
+
+        # exit with the original error code if set
+        if [ -n "$error_code" ]; then
+          exit "$error_code"
+        fi
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      if: ${{ always() }}
+      with:
+        name: TestLens logs (${{ github.job }} - ${{ job.check_run_id }})
+        path: '**/build/**/testlens-logs/**'
+        if-no-files-found: ignore

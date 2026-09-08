@@ -1,0 +1,351 @@
+/*
+ * Copyright 2015-2026 the original author or authors.
+ *
+ * All rights reserved. This program and the accompanying materials are
+ * made available under the terms of the Eclipse Public License v2.0 which
+ * accompanies this distribution and is available at
+ *
+ * https://www.eclipse.org/legal/epl-v20.html
+ */
+
+package org.junit.platform.suite.engine;
+
+import static java.util.Objects.requireNonNull;
+import static java.util.function.Predicate.isEqual;
+import static java.util.stream.Collectors.joining;
+import static org.junit.platform.commons.support.AnnotationSupport.findAnnotation;
+import static org.junit.platform.commons.util.FunctionUtils.where;
+import static org.junit.platform.engine.DiscoveryIssue.Severity.INFO;
+import static org.junit.platform.engine.DiscoveryIssue.Severity.WARNING;
+import static org.junit.platform.suite.engine.SuiteAnnotationSupport.findAnnotationByName;
+import static org.junit.platform.suite.engine.SuiteLauncherDiscoveryRequestBuilder.request;
+
+import java.lang.reflect.Method;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiFunction;
+import java.util.function.Predicate;
+
+import org.jspecify.annotations.Nullable;
+import org.junit.platform.commons.JUnitException;
+import org.junit.platform.commons.support.ReflectionSupport;
+import org.junit.platform.commons.util.Preconditions;
+import org.junit.platform.commons.util.StringUtils;
+import org.junit.platform.engine.CancellationToken;
+import org.junit.platform.engine.ConfigurationParameters;
+import org.junit.platform.engine.DiscoveryIssue;
+import org.junit.platform.engine.EngineDiscoveryListener;
+import org.junit.platform.engine.EngineExecutionListener;
+import org.junit.platform.engine.OutputDirectoryCreator;
+import org.junit.platform.engine.TestDescriptor;
+import org.junit.platform.engine.TestExecutionResult;
+import org.junit.platform.engine.UniqueId;
+import org.junit.platform.engine.UniqueId.Segment;
+import org.junit.platform.engine.discovery.DiscoverySelectors;
+import org.junit.platform.engine.support.descriptor.AbstractTestDescriptor;
+import org.junit.platform.engine.support.descriptor.ClassSource;
+import org.junit.platform.engine.support.discovery.DiscoveryIssueReporter;
+import org.junit.platform.engine.support.hierarchical.Node.SkipResult;
+import org.junit.platform.engine.support.hierarchical.OpenTest4JAwareThrowableCollector;
+import org.junit.platform.engine.support.hierarchical.ThrowableCollector;
+import org.junit.platform.engine.support.store.Namespace;
+import org.junit.platform.engine.support.store.NamespacedHierarchicalStore;
+import org.junit.platform.launcher.LauncherDiscoveryListener;
+import org.junit.platform.launcher.LauncherDiscoveryRequest;
+import org.junit.platform.launcher.TestExecutionListener;
+import org.junit.platform.launcher.TestIdentifier;
+import org.junit.platform.launcher.TestPlan;
+import org.junit.platform.launcher.core.LauncherDiscoveryResult;
+import org.junit.platform.launcher.listeners.SummaryGeneratingListener;
+import org.junit.platform.suite.api.Disabled;
+import org.junit.platform.suite.api.Suite;
+import org.junit.platform.suite.api.SuiteDisplayName;
+
+/**
+ * {@link TestDescriptor} for tests based on the JUnit Platform Suite API.
+ *
+ * <h2>Default Display Names</h2>
+ *
+ * <p>The default display name is the simple name of the class.
+ *
+ * @since 1.8
+ * @see SuiteDisplayName
+ */
+final class SuiteTestDescriptor extends AbstractTestDescriptor {
+
+	static final String SEGMENT_TYPE = "suite";
+	private static final SkipResult CANCELLED_SKIP_RESULT = SkipResult.skip("Execution cancelled");
+	private static final String ORG_JUNIT_JUPITER_API_DISABLED = "org.junit.jupiter.api.Disabled";
+
+	private final SuiteLauncherDiscoveryRequestBuilder discoveryRequestBuilder = request();
+	private final ConfigurationParameters configurationParameters;
+	private final OutputDirectoryCreator outputDirectoryCreator;
+	private final Boolean failIfNoTests;
+	private final Class<?> suiteClass;
+	private final LifecycleMethods lifecycleMethods;
+
+	private @Nullable LauncherDiscoveryResult launcherDiscoveryResult;
+
+	private @Nullable SuiteLauncher launcher;
+
+	SuiteTestDescriptor(UniqueId id, Class<?> suiteClass, ConfigurationParameters configurationParameters,
+			OutputDirectoryCreator outputDirectoryCreator, EngineDiscoveryListener discoveryListener,
+			DiscoveryIssueReporter issueReporter) {
+		super(id, getSuiteDisplayName(suiteClass, issueReporter), ClassSource.from(suiteClass));
+		this.configurationParameters = configurationParameters;
+		this.outputDirectoryCreator = outputDirectoryCreator;
+		this.failIfNoTests = getFailIfNoTests(suiteClass);
+		this.suiteClass = suiteClass;
+		this.lifecycleMethods = new LifecycleMethods(suiteClass, issueReporter);
+		this.discoveryRequestBuilder.listener(DiscoveryIssueForwardingListener.create(id, discoveryListener));
+		reportUseOfJupiterDisabled(suiteClass, issueReporter);
+	}
+
+	private static Boolean getFailIfNoTests(Class<?> suiteClass) {
+		// @formatter:off
+		return findAnnotation(suiteClass, Suite.class)
+				.map(Suite::failIfNoTests)
+				.orElseThrow(() -> new JUnitException("Suite [%s] was not annotated with @Suite".formatted(suiteClass.getName())));
+		// @formatter:on
+	}
+
+	static void reportUseOfJupiterDisabled(Class<?> suiteClass, DiscoveryIssueReporter issueReporter) {
+		findAnnotationByName(suiteClass, ORG_JUNIT_JUPITER_API_DISABLED) //
+				.map(annotation -> {
+					String message = "The suite [%s] was annotated with [%s] which does *not* disable the suite. Did you mean to use [%s]?" //
+							.formatted(suiteClass, annotation.annotationType().getName(), Disabled.class.getName());
+					return DiscoveryIssue.create(INFO, message);
+				}) //
+				.ifPresent(issueReporter::reportIssue);
+	}
+
+	SuiteTestDescriptor addDiscoveryRequestFrom(Class<?> suiteClass) {
+		Preconditions.condition(launcherDiscoveryResult == null,
+			"discovery request cannot be modified after discovery");
+		discoveryRequestBuilder.applySelectorsAndFiltersFromSuite(suiteClass);
+		return this;
+	}
+
+	SuiteTestDescriptor addDiscoveryRequestFrom(UniqueId uniqueId) {
+		Preconditions.condition(launcherDiscoveryResult == null,
+			"discovery request cannot be modified after discovery");
+		discoveryRequestBuilder.selectors(DiscoverySelectors.selectUniqueId(uniqueId));
+		return this;
+	}
+
+	void discover() {
+		if (launcherDiscoveryResult != null) {
+			return;
+		}
+
+		// @formatter:off
+		LauncherDiscoveryRequest request = discoveryRequestBuilder
+				.filterStandardClassNamePatterns()
+				.disableImplicitConfigurationParameters()
+				.parentConfigurationParameters(configurationParameters)
+				.applyConfigurationParametersFromSuite(suiteClass)
+				.outputDirectoryCreator(outputDirectoryCreator)
+				.build();
+		// @formatter:on
+		this.launcher = SuiteLauncher.create();
+		this.launcherDiscoveryResult = launcher.discover(request, getUniqueId());
+		// @formatter:off
+		launcherDiscoveryResult.getTestEngines()
+				.stream()
+				.map(testEngine -> launcherDiscoveryResult.getEngineTestDescriptor(testEngine))
+				.forEach(this::addChild);
+		// @formatter:on
+	}
+
+	@Override
+	public Type getType() {
+		return Type.CONTAINER;
+	}
+
+	private static String getSuiteDisplayName(Class<?> suiteClass, DiscoveryIssueReporter issueReporter) {
+		// @formatter:off
+		var nonBlank = issueReporter.createReportingCondition(StringUtils::isNotBlank, __ -> {
+			String message = "@SuiteDisplayName on %s must be declared with a non-blank value.".formatted(
+					suiteClass.getName());
+			return DiscoveryIssue.builder(WARNING, message)
+					.source(ClassSource.from(suiteClass))
+					.build();
+		}).toPredicate();
+
+		return findAnnotation(suiteClass, SuiteDisplayName.class)
+				.map(SuiteDisplayName::value)
+				.filter(nonBlank)
+				.orElse(suiteClass.getSimpleName());
+		// @formatter:on
+	}
+
+	void execute(EngineExecutionListener executionListener, NamespacedHierarchicalStore<Namespace> requestLevelStore,
+			CancellationToken cancellationToken) {
+		var skipResult = checkWhetherSkipped(cancellationToken);
+		if (skipResult.isSkipped()) {
+			executionListener.executionSkipped(this, skipResult.getReason().orElse("<unknown>"));
+			return;
+		}
+
+		executionListener.executionStarted(this);
+		ThrowableCollector throwableCollector = new OpenTest4JAwareThrowableCollector();
+
+		executeBeforeSuiteMethods(throwableCollector);
+
+		var summary = new SuiteSummaryGeneratingListener();
+		executeTests(executionListener, summary, requestLevelStore, cancellationToken, throwableCollector);
+
+		executeAfterSuiteMethods(throwableCollector);
+
+		TestExecutionResult testExecutionResult = computeTestExecutionResult(summary, throwableCollector);
+		executionListener.executionFinished(this, testExecutionResult);
+	}
+
+	private SkipResult checkWhetherSkipped(CancellationToken cancellationToken) {
+		return cancellationToken.isCancellationRequested() //
+				? CANCELLED_SKIP_RESULT //
+				: shouldBeSkipped();
+	}
+
+	private SkipResult shouldBeSkipped() {
+		return findAnnotation(suiteClass, Disabled.class) //
+				.map(this::toSkipResult) //
+				.orElse(SkipResult.doNotSkip());
+	}
+
+	private SkipResult toSkipResult(Disabled disabled) {
+		var value = disabled.value();
+		var reason = StringUtils.isNotBlank(value) ? value : suiteClass + " is @Disabled";
+		return SkipResult.skip(reason);
+	}
+
+	private void executeBeforeSuiteMethods(ThrowableCollector throwableCollector) {
+		if (throwableCollector.isNotEmpty()) {
+			return;
+		}
+		for (Method beforeSuiteMethod : lifecycleMethods.beforeSuite) {
+			throwableCollector.execute(() -> ReflectionSupport.invokeMethod(beforeSuiteMethod, null));
+			if (throwableCollector.isNotEmpty()) {
+				return;
+			}
+		}
+	}
+
+	private void executeTests(EngineExecutionListener executionListener, TestExecutionListener testExecutionListener,
+			NamespacedHierarchicalStore<Namespace> requestLevelStore, CancellationToken cancellationToken,
+			ThrowableCollector throwableCollector) {
+
+		if (throwableCollector.isNotEmpty()) {
+			return;
+		}
+
+		// #2838: The discovery result from a suite may have been filtered by
+		// post discovery filters from the launcher. The discovery result should
+		// be pruned accordingly.
+		LauncherDiscoveryResult discoveryResult = requireNonNull(this.launcherDiscoveryResult).withRetainedEngines(
+			getChildren()::contains);
+
+		requireNonNull(launcher).execute(discoveryResult, executionListener, testExecutionListener, requestLevelStore,
+			cancellationToken);
+	}
+
+	private void executeAfterSuiteMethods(ThrowableCollector throwableCollector) {
+		for (Method afterSuiteMethod : lifecycleMethods.afterSuite) {
+			throwableCollector.execute(() -> ReflectionSupport.invokeMethod(afterSuiteMethod, null));
+		}
+	}
+
+	private TestExecutionResult computeTestExecutionResult(SuiteSummaryGeneratingListener summary,
+			ThrowableCollector throwableCollector) {
+		var throwable = throwableCollector.getThrowable();
+		if (throwable != null) {
+			return TestExecutionResult.failed(throwable);
+		}
+		if (failIfNoTests && summary.getTestsFoundCount() == 0) {
+			return TestExecutionResult.failed(new NoTestsDiscoveredException(suiteClass));
+		}
+		return TestExecutionResult.successful();
+	}
+
+	@Override
+	public boolean mayRegisterTests() {
+		// While a suite will not register new tests after discovery, we pretend
+		// it does. This allows the suite to fail if no tests were discovered.
+		// Otherwise, the empty suite would be pruned.
+		return true;
+	}
+
+	private static class LifecycleMethods {
+
+		final List<Method> beforeSuite;
+		final List<Method> afterSuite;
+
+		LifecycleMethods(Class<?> suiteClass, DiscoveryIssueReporter issueReporter) {
+			beforeSuite = LifecycleMethodUtils.findBeforeSuiteMethods(suiteClass, issueReporter);
+			afterSuite = LifecycleMethodUtils.findAfterSuiteMethods(suiteClass, issueReporter);
+		}
+	}
+
+	private record DiscoveryIssueForwardingListener(EngineDiscoveryListener discoveryListener,
+			BiFunction<UniqueId, DiscoveryIssue, DiscoveryIssue> issueTransformer)
+			implements LauncherDiscoveryListener {
+
+		private static final Predicate<Segment> SUITE_SEGMENTS = where(Segment::getType, isEqual(SEGMENT_TYPE));
+
+		static DiscoveryIssueForwardingListener create(UniqueId id, EngineDiscoveryListener discoveryListener) {
+			boolean isNestedSuite = id.getSegments().stream().filter(SUITE_SEGMENTS).count() > 1;
+			if (isNestedSuite) {
+				return new DiscoveryIssueForwardingListener(discoveryListener, (__, issue) -> issue);
+			}
+			return new DiscoveryIssueForwardingListener(discoveryListener,
+				(engineUniqueId, issue) -> issue.withMessage(message -> {
+					String engineId = engineUniqueId.getLastSegment().getValue();
+					if (SuiteEngineDescriptor.ENGINE_ID.equals(engineId)) {
+						return message;
+					}
+					String suitePath = engineUniqueId.getSegments().stream() //
+							.filter(SUITE_SEGMENTS) //
+							.map(Segment::getValue) //
+							.collect(joining(" > "));
+					if (message.endsWith(".")) {
+						message = message.substring(0, message.length() - 1);
+					}
+					return "[%s] %s (via @Suite %s).".formatted(engineId, message, suitePath);
+				}));
+		}
+
+		@Override
+		public void issueEncountered(UniqueId engineUniqueId, DiscoveryIssue issue) {
+			DiscoveryIssue transformedIssue = this.issueTransformer.apply(engineUniqueId, issue);
+			this.discoveryListener.issueEncountered(engineUniqueId, transformedIssue);
+		}
+	}
+
+	/**
+	 * A minimal implementation of the {@link SummaryGeneratingListener}.
+	 * <p>
+	 * The {@code SummaryGeneratingListener} assumes that all the ancestors all
+	 * test descriptors are in the test plan. This isn't true for the suite engine
+	 * which only executes a subtree of the test plan. This implementation tracks
+	 * only the essentials.
+	 */
+	private static final class SuiteSummaryGeneratingListener implements TestExecutionListener {
+		private final AtomicLong testsFound = new AtomicLong();
+
+		@Override
+		public void testPlanExecutionStarted(TestPlan testPlan) {
+			this.testsFound.set(testPlan.countTestIdentifiers(TestIdentifier::isTest));
+		}
+
+		@Override
+		public void dynamicTestRegistered(TestIdentifier testIdentifier) {
+			if (testIdentifier.isTest()) {
+				testsFound.incrementAndGet();
+			}
+		}
+
+		long getTestsFoundCount() {
+			return testsFound.get();
+		}
+	}
+}

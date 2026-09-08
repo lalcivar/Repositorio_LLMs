@@ -1,0 +1,94 @@
+
+import de.undercouch.gradle.tasks.download.Download
+import junitbuild.compatibility.BackwardCompatibilityChecksExtension
+import junitbuild.compatibility.roseau.RoseauDiff
+import junitbuild.extensions.dependencyFromLibs
+
+plugins {
+	java
+	id("de.undercouch.download")
+}
+
+val roseauDependencies = configurations.dependencyScope("roseau")
+val roseauClasspath = configurations.resolvable("roseauClasspath") {
+	extendsFrom(roseauDependencies.get())
+}
+dependencies {
+	roseauDependencies(dependencyFromLibs("roseau-cli"))
+	roseauDependencies(platform(dependencyFromLibs("log4j-bom"))) {
+		because("Workaround for CVE-2025-68161")
+	}
+	constraints {
+		roseauDependencies("org.apache.commons:commons-lang3") {
+			version {
+				require("3.18.0")
+			}
+			because("Workaround for CVE-2025-48924")
+		}
+		roseauDependencies("com.fasterxml.jackson.core:jackson-databind") {
+			version {
+				require("2.22.1")
+			}
+			because("Workaround for CVE-2026-54515")
+		}
+		roseauDependencies("org.codehaus.plexus:plexus-utils") {
+			version {
+				require("3.6.1")
+			}
+			because("Workaround for CVE-2025-67030")
+		}
+	}
+}
+
+val extension = extensions.create<BackwardCompatibilityChecksExtension>("backwardCompatibilityChecks").apply {
+	enabled.convention(true)
+	previousVersion.apply {
+		convention(providers.gradleProperty("apiBaselineVersion"))
+		finalizeValueOnRead()
+	}
+}
+
+val downloadPreviousReleaseJar = tasks.register("downloadPreviousReleaseJar", Download::class) {
+	if (gradle.startParameter.isOffline) {
+		enabled = false
+	}
+	val enabled = extension.enabled
+	onlyIf { enabled.get() }
+	val previousVersion = extension.previousVersion.get()
+	src("https://repo1.maven.org/maven2/${project.group.toString().replace(".", "/")}/${project.name}/$previousVersion/${project.name}-$previousVersion.jar")
+	dest(layout.buildDirectory.dir("previousRelease"))
+	overwrite(false)
+	quiet(true)
+	retries(2)
+	outputs.cacheIf { true }
+}
+
+val roseauCsvFile = layout.buildDirectory.file("reports/roseau/breaking-changes.csv")
+
+val roseau = tasks.register("roseau", RoseauDiff::class) {
+	if (gradle.startParameter.isOffline) {
+		enabled = false
+	}
+	val enabled = extension.enabled
+	onlyIf { enabled.get() }
+
+	toolClasspath.from(roseauClasspath)
+	libraryClasspath.from(configurations.compileClasspath)
+	v1 = downloadPreviousReleaseJar.map { it.outputFiles.single() }
+	v2 = tasks.jar.flatMap { it.archiveFile }.map { it.asFile }
+	configFile = layout.settingsDirectory.file("gradle/config/roseau/config.yaml")
+	layout.settingsDirectory.file("gradle/config/roseau/accepted-breaking-changes.csv").asFile.let {
+		if (it.exists()) {
+			acceptedChangesCsvFile = it
+		}
+	}
+	reportDir = layout.buildDirectory.dir("reports/roseau")
+}
+
+val checkBackwardCompatibility = tasks.register("checkBackwardCompatibility") {
+	dependsOn(roseau)
+}
+
+tasks.check {
+	dependsOn(checkBackwardCompatibility)
+}

@@ -1,0 +1,9 @@
+rules:
+  cache-poisoning:
+    ignore:
+      # reports issues for setup-node which isn't used while releasing
+      - main.yml
+  secrets-outside-env:
+    disable: true
+  secrets-inherit:
+    disable: true

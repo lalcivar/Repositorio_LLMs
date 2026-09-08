@@ -1,0 +1,37 @@
+name: Gradle Dependency Submission
+
+on:
+  push:
+    branches:
+      - main
+
+permissions: {}
+
+env:
+  DEVELOCITY_ACCESS_KEY: ${{ secrets.DEVELOCITY_ACCESS_KEY }}
+
+jobs:
+  dependency-submission:
+    if: github.repository == 'junit-team/junit-framework'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 1
+        persist-credentials: false
+    - name: Setup Java
+      uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+      with:
+        distribution: temurin
+        java-version: 25
+        check-latest: true
+    - name: Generate and submit dependency graph
+      id: dependency-submission
+      uses: gradle/actions/dependency-submission@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      continue-on-error: true
+    - name: Generate and submit dependency graph (retry)
+      if: steps.dependency-submission.outcome == 'failure'
+      uses: gradle/actions/dependency-submission@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0

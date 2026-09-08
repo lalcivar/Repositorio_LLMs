@@ -1,0 +1,20 @@
+[[v6.1.0]]
+== 6.1.0
+
+*Date of Release:* May 19, 2026
+
+*Scope:*
+
+* New `@DefaultLocale` and `@DefaultTimeZone` built-in extensions
+* New built-in extension for clearing/setting/restoring system properties
+* Configurable deletion strategy for `@TempDir` that allows ignoring failures
+* New `org.junit.start` module for usage in compact source files
+* Execution mode configuration support for dynamic tests and containers
+* Improved stack trace pruning for assertion failures
+* New `org.junit.jupiter.api.Constants` class for referencing configuration parameters
+* Improvements to legacy XML reports for parameterized test classes
+* New parallel test executor implementation
+* New experimental memory cleanup mode for large test suites
+
+For complete details consult the
+https://docs.junit.org/6.1.0/release-notes.html[6.1.0 Release Notes] online.

@@ -1,0 +1,24 @@
+.+ org.junit.platform.launcher.core.ServiceLoaderRegistry load
+.+ Loaded LauncherInterceptor instances: ..
+.+ org.junit.platform.launcher.core.ServiceLoaderRegistry load
+.+ Loaded LauncherSessionListener instances: ..
+.+ org.junit.platform.launcher.core.ServiceLoaderTestEngineRegistry loadTestEngines
+.+ Discovered TestEngines:
+- junit-platform-suite .+
+- junit-jupiter .+
+- junit-vintage .+
+.+ org.junit.platform.launcher.core.ServiceLoaderRegistry load
+.+ Loaded PostDiscoveryFilter instances: ..
+.+ org.junit.platform.launcher.core.ServiceLoaderRegistry load
+.+ Loaded LauncherDiscoveryListener instances: ..
+.+ org.junit.platform.launcher.core.ServiceLoaderRegistry load
+.+ Loaded TestExecutionListener instances: .+ \Q(excluded classes: [])\E
+.+ org.junit.platform.launcher.core.ServiceLoaderTestEngineRegistry loadTestEngines
+.+ Discovered TestEngines:
+- junit-platform-suite .+
+- junit-jupiter .+
+- junit-vintage .+
+>> LOGGER >>
+INFO: TestEngine with ID 'junit-vintage' encountered a non-critical issue during test discovery:
+
+(1) [INFO] The JUnit Vintage engine is deprecated and should only be used temporarily while migrating tests to JUnit Jupiter or another testing framework with native JUnit Platform support.

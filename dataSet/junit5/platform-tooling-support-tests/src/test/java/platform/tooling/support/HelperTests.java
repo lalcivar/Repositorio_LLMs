@@ -1,0 +1,71 @@
+/*
+ * Copyright 2015-2026 the original author or authors.
+ *
+ * All rights reserved. This program and the accompanying materials are
+ * made available under the terms of the Eclipse Public License v2.0 which
+ * accompanies this distribution and is available at
+ *
+ * https://www.eclipse.org/legal/epl-v20.html
+ */
+
+package platform.tooling.support;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
+import java.nio.file.Files;
+import java.util.Optional;
+
+import org.junit.jupiter.api.Order;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+@Order(Integer.MAX_VALUE)
+class HelperTests {
+
+	@Test
+	void loadModuleDirectoryNames() {
+		assertThat(Helper.loadModuleDirectoryNames()) //
+				.containsExactlyInAnyOrder( //
+					"junit-jupiter", //
+					"junit-jupiter-api", //
+					"junit-jupiter-engine", //
+					"junit-jupiter-migrationsupport", //
+					"junit-jupiter-params", //
+					"junit-start", //
+					"junit-platform-commons", //
+					"junit-platform-console", //
+					"junit-platform-engine", //
+					"junit-platform-launcher", //
+					"junit-platform-reporting", //
+					"junit-platform-suite", //
+					"junit-platform-suite-api", //
+					"junit-platform-suite-engine", //
+					"junit-platform-testkit", //
+					"junit-vintage-engine"//
+				);
+	}
+
+	@Test
+	void version() {
+		assertNotNull(Helper.version());
+	}
+
+	@Test
+	void nonExistingJdkVersionYieldsAnEmptyOptional() {
+		assertEquals(Optional.empty(), Helper.getJavaHome(-1));
+	}
+
+	@ParameterizedTest
+	@ValueSource(ints = 17)
+	void checkJavaHome(int version) {
+		var home = Helper.getJavaHome(version);
+		assumeTrue(home.isPresent(), "No 'jdk' element found in Maven toolchain for: " + version);
+		assertTrue(Files.isDirectory(home.get()));
+	}
+
+}
